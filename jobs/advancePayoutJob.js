@@ -19,7 +19,7 @@ async function runAdvancePayoutJob(){
             await Transaction.create([
                 {
                     userId: sale.userId,
-                    saleid: sale._id,
+                    saleId: sale._id,
                     status: 'success',
                     amount: advanceAmount,
                     type: "advance"
