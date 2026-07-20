@@ -106,6 +106,7 @@ async function reconcileSale(req, res) {
         status: "success",
         amount: finalReconcileAmount
       }], { session });
+      
 
       await User.findOneAndUpdate(
         { userId: sale.userId },
