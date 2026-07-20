@@ -1,6 +1,6 @@
 const User = require('../models/User');
 const Transaction = require('../models/Transaction');
-const { default: mongoose } = require('mongoose');
+const mongoose = require('mongoose');
 
 const ONE_DAY = 24 * 60 * 60 * 1000;
 
@@ -107,7 +107,7 @@ async function resolveWithdrawal(req, res) {
         { new: true, session }
       );
       await session.commitTransaction();
-      return res.json({ message: `Withdrawal ${outcome}, amount refunded`, user, transaction: txn });
+      return res.status(200).json({ message: `Withdrawal ${outcome}, amount refunded`, user, transaction: txn, success:true });
     }
 
     await session.commitTransaction();

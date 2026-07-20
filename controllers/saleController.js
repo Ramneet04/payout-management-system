@@ -1,7 +1,7 @@
 const User = require("../models/User");
 const Sale = require("../models/Sale");
 const Transaction = require('../models/Transaction');
-const { default: mongoose } = require("mongoose");
+const mongoose= require("mongoose");
 
 async function createSale(req,res) {
     try {
@@ -60,7 +60,7 @@ async function getSales(req,res){
             sales
         })
     } catch (error) {
-        return res.sttaus(500).json({
+        return res.status(500).json({
             message:"trouble fecthing sales",
             success:false
         })
@@ -72,7 +72,7 @@ async function reconcileSale(req,res){
     try {
         const {status} = req.body;
 
-    if((status !== "approved") || (status !== "rejected")){
+    if(!['approved', 'rejected'].includes(status)){
         return res.status(400).json({ 
             message:"needs a valid status",
             success:false,
@@ -80,16 +80,15 @@ async function reconcileSale(req,res){
     }
     const id=req.params.id;
 
-    const sale=await Sale.findById(id);
-    if (!sale) return res.status(404).json({ message: 'Sale not found', success:false });
-
-    if(sale.status !=="pending"){
-        return res.status(409).json({
-            message:"sale is already reconciled",
-            status: sale.status,
-            success:false
-        })
-    };
+    const sale = await Sale.findOneAndUpdate(
+        { _id: sale._id, status: 'pending' },
+        { $set: { status, reconciledAt: new Date() } },
+        { new: true, session }
+    );
+    if (!sale) {
+      await session.abortTransaction();
+      return res.status(409).json({ message: "sale is already reconciled", success: false });
+    }
 
     const session = await mongoose.startSession();
     try {
@@ -100,24 +99,19 @@ async function reconcileSale(req,res){
         Number((sale.earning - sale.advanceAmount).toFixed(2)):
         Number((-sale.advanceAmount).toFixed(2));
 
-        await Transaction.create({
+        await Transaction.create([{
             userId: sale.userId,
             saleId: sale._id,
             type: "final_adjustment",
             status:"success",
             amount: finalReconcileAmount
-        }, {session})
+        }], {session})
 
-       const user = await user.findOne({userId: sale.userId});
-       if(user){
-        user.withdrawableBalance= user.withdrawableBalance+finalReconcileAmount;
-        await user.save({session});
-       }else{
-        await User.create({
-            userId:sale.userId,
-            withdrawableBalance: finalReconcileAmount
-        }, {session})
-       }
+       const user = await User.findOne({userId: sale.userId});
+       await User.findOneAndUpdate(
+        { userId: sale.userId },
+        { $inc: { withdrawableBalance: finalReconcileAmount } },
+        { upsert: true, session });
 
        sale.status=status;
        sale.reconciledAt=new Date();
@@ -131,11 +125,11 @@ async function reconcileSale(req,res){
        });
 
     } catch (error) {
+        await session.abortTransaction();
         res.status(500).json({
             success:false,
             message:error.message
         })
-        await session.abortTransaction();
     } finally{
         await session.endSession();
     }
