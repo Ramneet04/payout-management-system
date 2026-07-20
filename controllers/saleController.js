@@ -67,79 +67,68 @@ async function getSales(req,res){
     }
 };
 
-async function reconcileSale(req,res){
-
-    try {
-        const {status} = req.body;
-
-    if(!['approved', 'rejected'].includes(status)){
-        return res.status(400).json({ 
-            message:"needs a valid status",
-            success:false,
-         });
+async function reconcileSale(req, res) {
+  try {
+    const { status } = req.body;
+    if (!['approved', 'rejected'].includes(status)) {
+      return res.status(400).json({ message: "needs a valid status", success: false });
     }
-    const id=req.params.id;
-
-    const sale = await Sale.findOneAndUpdate(
-        { _id: sale._id, status: 'pending' },
-        { $set: { status, reconciledAt: new Date() } },
-        { new: true, session }
-    );
-    if (!sale) {
-      await session.abortTransaction();
-      return res.status(409).json({ message: "sale is already reconciled", success: false });
-    }
+    const id = req.params.id;
 
     const session = await mongoose.startSession();
     try {
+      session.startTransaction();
 
-        session.startTransaction();
+      const existingSale = await Sale.findById(id).session(session);
+      if (!existingSale) {
+        await session.abortTransaction();
+        return res.status(404).json({ message: 'Sale not found', success: false });
+      }
 
-        const finalReconcileAmount= status === "approved" ?
-        Number((sale.earning - sale.advanceAmount).toFixed(2)):
-        Number((-sale.advanceAmount).toFixed(2));
+      const finalReconcileAmount = status === "approved"
+        ? Number((existingSale.earning - existingSale.advanceAmount).toFixed(2))
+        : Number((-existingSale.advanceAmount).toFixed(2));
 
-        await Transaction.create([{
-            userId: sale.userId,
-            saleId: sale._id,
-            type: "final_adjustment",
-            status:"success",
-            amount: finalReconcileAmount
-        }], {session})
+      const sale = await Sale.findOneAndUpdate(
+        { _id: id, status: 'pending' },
+        { $set: { status, reconciledAt: new Date() } },
+        { new: true, session }
+      );
+      if (!sale) {
+        await session.abortTransaction();
+        return res.status(409).json({ message: "sale is already reconciled", success: false });
+      }
 
-       const user = await User.findOne({userId: sale.userId});
-       await User.findOneAndUpdate(
+      await Transaction.create([{
+        userId: sale.userId,
+        saleId: sale._id,
+        type: "final_adjustment",
+        status: "success",
+        amount: finalReconcileAmount
+      }], { session });
+
+      await User.findOneAndUpdate(
         { userId: sale.userId },
         { $inc: { withdrawableBalance: finalReconcileAmount } },
-        { upsert: true, session });
+        { upsert: true, session }
+      );
 
-       sale.status=status;
-       sale.reconciledAt=new Date();
-       await sale.save({session});
-       await session.commitTransaction();
-       res.status(200).json({
-        success:true,
-        message:"reconcile done successfully",
+      await session.commitTransaction();
+      res.status(200).json({
+        success: true,
+        message: "reconcile done successfully",
         sale,
         finalAdjustment: finalReconcileAmount
-       });
-
+      });
     } catch (error) {
-        await session.abortTransaction();
-        res.status(500).json({
-            success:false,
-            message:error.message
-        })
-    } finally{
-        await session.endSession();
+      await session.abortTransaction();
+      res.status(500).json({ success: false, message: error.message });
+    } finally {
+      await session.endSession();
     }
-    } catch (error) {
-        res.status(500).json({
-            success:false,
-            message:error.message
-        })
-    }
-
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
 }
 
 module.exports = {createSale, getSales, reconcileSale};
